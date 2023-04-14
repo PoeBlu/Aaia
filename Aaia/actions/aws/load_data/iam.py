@@ -55,9 +55,8 @@ def getAWSManagedPolicies(data_path,account_name):
 
 def getAWSManagedPolicyVersions(data_path,account_name,policy_arn):
 	jqQuery='.Policies[] | select (.Arn == \"'+policy_arn+'\") .PolicyVersionList[]'
-	
-	data=getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery)
-	return data
+
+	return getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery)
 
 	
 def loadAWSManagedPolicies(neo4j_session,data_path,account_name):
@@ -84,16 +83,11 @@ def loadAWSManagedPolicies(neo4j_session,data_path,account_name):
 								A.PolicyId={PolicyId}, 
 								A.PolicyName={PolicyName}, 
 								A.UpdateDate=datetime({UpdateDate})'''
-						
+
 	managed_policies=getAWSManagedPolicies(data_path,account_name)
-	
-	for policy in managed_policies:
-		#Creating AWS Managed Policy Nodes
-		neo4j_session.run(ingest_aws_managed_policies,Arn=policy['Arn'],AccountNo=policy['Arn'].split(":")[4],AttachmentCount=policy['AttachmentCount'],CreateDate=policy['CreateDate'],DefaultVersionId=policy['DefaultVersionId'],IsAttachable=policy['IsAttachable'],Path=policy['Path'],PermissionsBoundaryUsageCount=policy['PermissionsBoundaryUsageCount'],PolicyId=policy['PolicyId'],PolicyName=policy['PolicyName'],Description=policy['Description'],UpdateDate=policy['UpdateDate'])
-		
-		
-		#Creating the Relationships between Policy Nodes and respective Resources (resources will be created if not present)
-		ingest_policy_statements='''	
+
+	#Creating the Relationships between Policy Nodes and respective Resources (resources will be created if not present)
+	ingest_policy_statements='''	
 								merge (C {Arn:{ResourceArn}}) set C:AWSPolicyResource  
 								with C match (B:AWSPolicy),(C:AWSPolicyResource) 
 								where B.Arn={Arn} and C.Arn={ResourceArn} with B,C 
@@ -133,18 +127,23 @@ def loadAWSManagedPolicies(neo4j_session,data_path,account_name):
 								A.PrincipalKey={PrincipalKey},
 								A.Aaia_ExpandedAction={Aaia_ExpandedAction}
 								'''
+	for policy in managed_policies:
+		#Creating AWS Managed Policy Nodes
+		neo4j_session.run(ingest_aws_managed_policies,Arn=policy['Arn'],AccountNo=policy['Arn'].split(":")[4],AttachmentCount=policy['AttachmentCount'],CreateDate=policy['CreateDate'],DefaultVersionId=policy['DefaultVersionId'],IsAttachable=policy['IsAttachable'],Path=policy['Path'],PermissionsBoundaryUsageCount=policy['PermissionsBoundaryUsageCount'],PolicyId=policy['PolicyId'],PolicyName=policy['PolicyName'],Description=policy['Description'],UpdateDate=policy['UpdateDate'])
+
+
 		#Getting the Policy Versions of each AWS Managed Policy
 		aws_managed_policy_version_list=getAWSManagedPolicyVersions(data_path,account_name,policy['Arn'])
-		
+
 		for policy_version in aws_managed_policy_version_list:
 			policy_version_createdate=policy_version['CreateDate']
 			policy_version_isdefaultversion=policy_version['IsDefaultVersion']
 			policy_version_versionid=policy_version['VersionId']
 			policy_document_details=getPolicyDocumentDetails(policy_version['Document'])
-		
+
 			for statement in policy_document_details['Statement']:
 				policy_statement_details=getPolicyStatementDetails(statement)
-				
+
 				#Since empty Principal / Action / Resource is returned as set 
 				#Stringifying it in query run below will result in value as 'set()'.
 				#The following is to avoid it
@@ -157,25 +156,25 @@ def loadAWSManagedPolicies(neo4j_session,data_path,account_name):
 					statement_action=""
 				if statement_resource==set():
 					statement_resource=""
-					
+
 				for resource in policy_statement_details['Resource']:
-									
+
 					neo4j_session.run(ingest_policy_statements,Aaia_ExpandedAction=policy_statement_details['Aaia_ExpandedAction'],ResourceArn=resource,Arn=policy['Arn'],VersionId=policy_version_versionid,VersionCreateDate=policy_version_createdate,IsDefaultVersion=policy_version_isdefaultversion,DocumentVersion=policy_document_details['Version'],DocumentId=policy_document_details['Id'],Effect=policy_statement_details['Effect'],ActionKey=policy_statement_details['ActionKey'],Action=str(statement_action).replace("[","").replace("]","").replace("{","").replace("}","").replace("'",""),Condition=str(policy_statement_details['Condition']),Sid=policy_statement_details['Sid'],ResourceKey=policy_statement_details['ResourceKey'],Resource=str(statement_resource).replace("[","").replace("]","").replace("{","").replace("}","").replace("'",""),Principal=str(statement_principal).replace("[","").replace("]","").replace("{","").replace("}","").replace("'",""),PrincipalKey=policy_statement_details['PrincipalKey'])
-			
+
 			if policy_version_isdefaultversion==True:
 				managed_policy_document_info_update_query='''merge (A:AWSPolicy {Arn:{Arn}})  
 															set A.DefaultDocumentId={DocumentId},
 															A.DefaultDocumentVersion={DocumentVersion}
 															'''
 				neo4j_session.run(managed_policy_document_info_update_query,Arn=policy['Arn'],DocumentId=policy_document_details['Id'],DocumentVersion=policy_document_details['Version'])
-				
-	
+
+
 	logger.info("[*] Completed loading AWS Managed Policies into neo4j instance for AWS account '%s'",account_name)
 
 
 def getPermissionBoundaryPolicyArn(data_path,account_name,iam_resource_type,principal_name):
-	jqQuery="."+iam_resource_type+".PermissionsBoundary.PermissionsBoundaryArn?"
-	with open(os.path.join(data_path,account_name,'iam','iam-get-'+iam_resource_type.lower(),principal_name),'r') as filein:
+	jqQuery = f".{iam_resource_type}.PermissionsBoundary.PermissionsBoundaryArn?"
+	with open(os.path.join(data_path, account_name, 'iam', f'iam-get-{iam_resource_type.lower()}', principal_name), 'r') as filein:
 		data=json.loads(filein.read())
 	policy_arn=pyjq.all(jqQuery,data)
 	if policy_arn==[None]:
@@ -212,65 +211,65 @@ def getAWSUsers(data_path,account_name):
 	data=OrderedDict()
 	# #For every user in iam-list-users, get the UserName,ARN,UserId,CreateDate,PasswordLastUsed,Path properties
 	# #and append to the data variable
-	
+
 	#Reason for using iam-list-users instead of iam-account-authorization-details is because it has PasswordLastUsed information which is not present in the latter.
-	
+
 	with open(os.path.join(data_path,account_name,'iam','iam-list-users.json'),'r') as filein:
 		file_content=json.loads(filein.read())
-				
+
 	jqQuery='.Users[] | { UserName : .UserName, Arn: .Arn, UserId: .UserId, CreateDate: .CreateDate, PasswordLastUsed: .PasswordLastUsed,Tags : .Tags, Path: .Path}'
-	
+
 	data=pyjq.all(jqQuery,file_content)
-	
+
 	#iam-list-users does not have tags as part of the details. Hence this is being taken from 
 	#iam-account-authorization-details and inserted as part of the OrderedDictionary
-	
+
 	jqQuery='.UserDetailList[] | select(.UserName == "<Replace_UserName>") | .Tags[]'
 	for user_data in data:
 		user_tags=getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery.replace("<Replace_UserName>",user_data['UserName']))
-		user_data.__setitem__('Tags',str(json.dumps(user_tags)))
+		user_data.__setitem__('Tags', json.dumps(user_tags))
 
 	logger.debug("[*] Completed getting AWS User data from '%s' for AWS Account '%s'",data_path+account_name+'/iam/iam-list-users.json',account_name) 
 
 	return data
 
 def getCredentialReportDetails(data_path,account_name,user_arn):
-		with open(os.path.join(data_path,account_name,'iam','iam-get-credential-report.json'),'r') as filein:
-			file_content=json.loads(filein.read())
-		
-		credential_report=base64.b64decode(file_content['Content'])
-		#Converting Bytes to String
-		credential_report=credential_report.decode("utf-8")
-		
-		data=StringIO(credential_report)   
-		reader = csv.DictReader(data, delimiter=',')
-		
-		for row in reader:
-			if row['arn']==user_arn:
-				record=OrderedDict()
-				for key in row.keys():
-					if key in ['user_creation_time','password_last_used','password_last_changed','password_next_rotation','access_key_1_last_rotated','access_key_1_last_used_date','access_key_2_last_rotated','access_key_2_last_used_date','cert_1_last_rotated','cert_2_last_rotated']:
+	with open(os.path.join(data_path,account_name,'iam','iam-get-credential-report.json'),'r') as filein:
+		file_content=json.loads(filein.read())
+
+	credential_report=base64.b64decode(file_content['Content'])
+	#Converting Bytes to String
+	credential_report=credential_report.decode("utf-8")
+
+	data=StringIO(credential_report)
+	reader = csv.DictReader(data, delimiter=',')
+
+	for row in reader:
+		if row['arn']==user_arn:
+			record=OrderedDict()
+			for key in row.keys():
+				if key in ['user_creation_time','password_last_used','password_last_changed','password_next_rotation','access_key_1_last_rotated','access_key_1_last_used_date','access_key_2_last_rotated','access_key_2_last_used_date','cert_1_last_rotated','cert_2_last_rotated']:
 					#For root user , password_enabled,password_last_changed,password_next_rotation is always not_supported . 
 					#Hence included it in the below condition 
 					#password_last_used is "no_information" , if the user has never logged in using the password
 					#In case the value is N/A , it means the user does not have that password / access key depending on context
 					#Source:https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_getting-report.html
 
-						if row[key]=="N/A" or row[key]=="not_supported" or row[key]=="no_information":
-							record.__setitem__(customCamelcase(key),row[key])
-						else:
-							#By default AWS has +00:00 offset in ISO 8601 time format. This technically
-							#means there is no additional offset to the existing time.
-							#Since we cant have a cypher query with datetime function to modify the time
-							#due to possibility of non-date values as mentioned in the above if condition
-							#we are converting it into an UTC format here by using the below hack
-
-							utc_format=row[key].split("+")[0]+"Z"
-							record.__setitem__(customCamelcase(key),utc_format)
-					else:
+					if row[key] in ["N/A", "not_supported", "no_information"]:
 						record.__setitem__(customCamelcase(key),row[key])
+					else:
+						#By default AWS has +00:00 offset in ISO 8601 time format. This technically
+						#means there is no additional offset to the existing time.
+						#Since we cant have a cypher query with datetime function to modify the time
+						#due to possibility of non-date values as mentioned in the above if condition
+						#we are converting it into an UTC format here by using the below hack
 
-				return record
+						utc_format=row[key].split("+")[0]+"Z"
+						record.__setitem__(customCamelcase(key),utc_format)
+				else:
+					record.__setitem__(customCamelcase(key),row[key])
+
+			return record
 				
 def loadAWSUserNodes(neo4j_session,data_path,account_name):
 	logger.info("[*] Loading AWS Users into neo4j instance for AWS account '%s'",account_name)
@@ -336,7 +335,7 @@ def loadAWSUserNodes(neo4j_session,data_path,account_name):
 
 	#Getting the user data from collected json exports
 	users_data=getAWSUsers(data_path,account_name)
-	
+
 	#For every record of users' data , create an user node with relevant properties in neo4j
 	for user_data in users_data:
 		logger.debug("[*] Loading of AWS User '%s' into neo4j for AWS account '%s' ",user_data['UserName'],account_name)
@@ -344,37 +343,48 @@ def loadAWSUserNodes(neo4j_session,data_path,account_name):
 		#Tags has been converted to json and then to string as neo4j does not support multiple values for a single 
 		#key
 
-		neo4j_session.run(ingest_aws_users,
-						  UserName=user_data['UserName'],
-						  AccountNo=str(user_data['Arn'].split(":")[4]),
-						  Arn=user_data['Arn'],UserId=user_data['UserId'],
-						  CreateDate=user_data['CreateDate'],
-						  PasswordLastUsed=credential_report_data['PasswordLastUsed'],
-						  Tags=str(json.dumps(user_data['Tags'])).replace("null",""),
-						  Path=user_data['Path'],
-						  PasswordEnabled=credential_report_data['PasswordEnabled'],
-						  PasswordLastChanged=credential_report_data['PasswordLastChanged'],
-						  PasswordNextRotation=credential_report_data['PasswordNextRotation'],
-						  MfaActive=credential_report_data['MfaActive'],
-						  AccessKey1Active=credential_report_data['AccessKey1Active'],
-						  AccessKey1LastRotated=credential_report_data['AccessKey1LastRotated'],
-						  AccessKey1LastUsedDate=credential_report_data['AccessKey1LastUsedDate'],
-						  AccessKey1LastUsedRegion=credential_report_data['AccessKey1LastUsedRegion'],
-						  AccessKey1LastUsedService=credential_report_data['AccessKey1LastUsedService'],
-						  AccessKey2Active=credential_report_data['AccessKey2Active'],
-						  AccessKey2LastRotated=credential_report_data['AccessKey2LastRotated'],
-						  AccessKey2LastUsedDate=credential_report_data['AccessKey2LastUsedDate'],
-						  AccessKey2LastUsedRegion=credential_report_data['AccessKey2LastUsedRegion'],
-						  AccessKey2LastUsedService=credential_report_data['AccessKey2LastUsedService'],
-						  Cert1Active=credential_report_data['Cert1Active'],
-						  Cert1LastRotated=credential_report_data['Cert1LastRotated'],
-						  Cert2Active=credential_report_data['Cert2Active'],
-						  Cert2LastRotated=credential_report_data['Cert2LastRotated'])
+		neo4j_session.run(
+			ingest_aws_users,
+			UserName=user_data['UserName'],
+			AccountNo=str(user_data['Arn'].split(":")[4]),
+			Arn=user_data['Arn'],
+			UserId=user_data['UserId'],
+			CreateDate=user_data['CreateDate'],
+			PasswordLastUsed=credential_report_data['PasswordLastUsed'],
+			Tags=json.dumps(user_data['Tags']).replace("null", ""),
+			Path=user_data['Path'],
+			PasswordEnabled=credential_report_data['PasswordEnabled'],
+			PasswordLastChanged=credential_report_data['PasswordLastChanged'],
+			PasswordNextRotation=credential_report_data['PasswordNextRotation'],
+			MfaActive=credential_report_data['MfaActive'],
+			AccessKey1Active=credential_report_data['AccessKey1Active'],
+			AccessKey1LastRotated=credential_report_data['AccessKey1LastRotated'],
+			AccessKey1LastUsedDate=credential_report_data['AccessKey1LastUsedDate'],
+			AccessKey1LastUsedRegion=credential_report_data[
+				'AccessKey1LastUsedRegion'
+			],
+			AccessKey1LastUsedService=credential_report_data[
+				'AccessKey1LastUsedService'
+			],
+			AccessKey2Active=credential_report_data['AccessKey2Active'],
+			AccessKey2LastRotated=credential_report_data['AccessKey2LastRotated'],
+			AccessKey2LastUsedDate=credential_report_data['AccessKey2LastUsedDate'],
+			AccessKey2LastUsedRegion=credential_report_data[
+				'AccessKey2LastUsedRegion'
+			],
+			AccessKey2LastUsedService=credential_report_data[
+				'AccessKey2LastUsedService'
+			],
+			Cert1Active=credential_report_data['Cert1Active'],
+			Cert1LastRotated=credential_report_data['Cert1LastRotated'],
+			Cert2Active=credential_report_data['Cert2Active'],
+			Cert2LastRotated=credential_report_data['Cert2LastRotated'],
+		)
 		logger.debug("[*] Completed loading of AWS User '%s' into neo4j for AWS account '%s' ",user_data['UserName'],account_name)
-		
+
 		#Loading Permission Boundary (if it exists)
 		loadPermissionBoundary(neo4j_session,data_path,account_name,user_data['Arn'])
-		
+
 	#Root user is not part of iam-list-users. This is part of Credential Report.
 	#For the sake of completeness. Loading the root user separately.
 	#Please note root user is never directly referenced as part of IAM Policies
@@ -383,7 +393,7 @@ def loadAWSUserNodes(neo4j_session,data_path,account_name):
 	#This node will not have any relations apart from Belongs_to to the AWSACcount
 	logger.debug("[*] Loading of AWS User '%s' into neo4j for AWS account 'root' ",account_name)
 	account_number=getAWSAccountNo(data_path,account_name)
-	root_arn="arn:aws:iam::"+str(account_number)+":root"
+	root_arn = f"arn:aws:iam::{str(account_number)}:root"
 	credential_report_data=getCredentialReportDetails(data_path,account_name,root_arn)
 	#Creating User Root
 	ingest_aws_root_user='''merge (A:AWSUser:AWSRoot {Arn :{Arn}}) 
@@ -437,7 +447,7 @@ def loadAWSUserNodes(neo4j_session,data_path,account_name):
 						A.Cert1LastRotated={Cert1LastRotated},
 						A.Cert2Active={Cert2Active},
 						A.Cert2LastRotated={Cert2LastRotated}'''
-	
+
 	neo4j_session.run(ingest_aws_root_user,UserName="root",AccountNo=account_number,Arn=root_arn,UserId="",CreateDate=credential_report_data['UserCreationTime'],PasswordLastUsed=credential_report_data['PasswordLastUsed'],Tags="",Path="",PasswordEnabled=credential_report_data['PasswordEnabled'],PasswordLastChanged=credential_report_data['PasswordLastChanged'],PasswordNextRotation=credential_report_data['PasswordNextRotation'],MfaActive=credential_report_data['MfaActive'],AccessKey1Active=credential_report_data['AccessKey1Active'],AccessKey1LastRotated=credential_report_data['AccessKey1LastRotated'],AccessKey1LastUsedDate=credential_report_data['AccessKey1LastUsedDate'],AccessKey1LastUsedRegion=credential_report_data['AccessKey1LastUsedRegion'],AccessKey1LastUsedService=credential_report_data['AccessKey1LastUsedService'],AccessKey2Active=credential_report_data['AccessKey2Active'],AccessKey2LastRotated=credential_report_data['AccessKey2LastRotated'],AccessKey2LastUsedDate=credential_report_data['AccessKey2LastUsedDate'],AccessKey2LastUsedRegion=credential_report_data['AccessKey2LastUsedRegion'],AccessKey2LastUsedService=credential_report_data['AccessKey2LastUsedService'],Cert1Active=credential_report_data['Cert1Active'],Cert1LastRotated=credential_report_data['Cert1LastRotated'],Cert2Active=credential_report_data['Cert2Active'],Cert2LastRotated=credential_report_data['Cert2LastRotated'])
 	logger.debug("[*] Completed loading of AWS User 'root' into neo4j for AWS account '%s' ",account_name)
 
@@ -445,51 +455,59 @@ def loadAWSUserNodes(neo4j_session,data_path,account_name):
 						
 def loadAWSManagedPolicyRelations(neo4j_session,data_path,account_name,iam_resource_type):
 
-	logger.info("[*] Establishing "+iam_resource_type+" relations with AWS Managed Policies into neo4j instance for AWS account '%s'",account_name)
+	logger.info(
+		f"[*] Establishing {iam_resource_type} relations with AWS Managed Policies into neo4j instance for AWS account '%s'",
+		account_name,
+	)
 	ingest_aws_managed_policy_relations='''match (A:AWSPolicy) where A.Arn={Arn} 
 										with A match (B) where B.Arn={PrincipalArn} 
 										with A,B merge (B)-[:AWSPolicyAttachment]->(A)'''
 
 	jqQuery=""
-	if iam_resource_type=="Role":
-		jqQuery='.RoleDetailList[] | .Arn'
-	elif iam_resource_type=="Group":
+	if iam_resource_type == "Group":
 		jqQuery='.GroupDetailList[] | .Arn'
-	elif iam_resource_type=="User":
+	elif iam_resource_type == "Role":
+		jqQuery='.RoleDetailList[] | .Arn'
+	elif iam_resource_type == "User":
 		jqQuery='.UserDetailList[] | .Arn'
 
 	iam_resource_arns=getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery)
-	
-	jqQuery=""	
-	if iam_resource_type=="Role":
-		jqQuery='.RoleDetailList[] | select(.Arn=="#Arn#") | .AttachedManagedPolicies[].PolicyArn'
-	elif iam_resource_type=="Group":
+
+	jqQuery=""
+	if iam_resource_type == "Group":
 		jqQuery='.GroupDetailList[] | select(.Arn=="#Arn#") | .AttachedManagedPolicies[].PolicyArn'
-	elif iam_resource_type=="User":
+	elif iam_resource_type == "Role":
+		jqQuery='.RoleDetailList[] | select(.Arn=="#Arn#") | .AttachedManagedPolicies[].PolicyArn'
+	elif iam_resource_type == "User":
 		jqQuery='.UserDetailList[] | select(.Arn=="#Arn#") | .AttachedManagedPolicies[].PolicyArn'
-		
-		
+
+
 	for iam_resource_arn in iam_resource_arns:
 		attached_managed_policy_arns=getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery.replace("#Arn#",iam_resource_arn))
 		for arn in attached_managed_policy_arns:
 			neo4j_session.run(ingest_aws_managed_policy_relations,Arn=arn,PrincipalArn=iam_resource_arn)
-	logger.info("[*] Completed establishing "+iam_resource_type+" relations with AWS Managed Policies into neo4j instance for AWS account '%s'",account_name)
+	logger.info(
+		f"[*] Completed establishing {iam_resource_type} relations with AWS Managed Policies into neo4j instance for AWS account '%s'",
+		account_name,
+	)
 
 def getAWSInlinePolicies(data_path,account_name,iam_resource_type,resource_arn):
 	jqQuery=""
-	if iam_resource_type=="Role":
-		jqQuery='.RoleDetailList[] | select(.Arn=="'+resource_arn+'") | .RolePolicyList[]?'
-	elif iam_resource_type=="Group":
-		jqQuery='.GroupDetailList[] | select(.Arn=="'+resource_arn+'") | .GroupPolicyList[]?'
-	elif iam_resource_type=="User":
-		jqQuery='.UserDetailList[] | select(.Arn=="'+resource_arn+'") | .UserPolicyList[]?'
-	
-	data=getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery)
-	return data	
+	if iam_resource_type == "Group":
+		jqQuery = f'.GroupDetailList[] | select(.Arn=="{resource_arn}") | .GroupPolicyList[]?'
+	elif iam_resource_type == "Role":
+		jqQuery = f'.RoleDetailList[] | select(.Arn=="{resource_arn}") | .RolePolicyList[]?'
+	elif iam_resource_type == "User":
+		jqQuery = f'.UserDetailList[] | select(.Arn=="{resource_arn}") | .UserPolicyList[]?'
+
+	return getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery)	
 
 	
 def loadAWSInlinePolicies(neo4j_session,data_path,account_name,iam_resource_type):
-	logger.info("[*] Loading AWS "+iam_resource_type+" Inline Policies into neo4j instance for AWS account '%s'",account_name)
+	logger.info(
+		f"[*] Loading AWS {iam_resource_type} Inline Policies into neo4j instance for AWS account '%s'",
+		account_name,
+	)
 
 	ingest_aws_inline_policies='''merge (A:AWSPolicy:AWSInlinePolicy 
 								{PolicyName: {PolicyName},
@@ -519,17 +537,17 @@ def loadAWSInlinePolicies(neo4j_session,data_path,account_name,iam_resource_type
 		jqQuery='.GroupDetailList[] | .Arn'
 	elif iam_resource_type=="User":
 		jqQuery='.UserDetailList[] | .Arn'
-	
+
 	#Getting the List of Arns of all resources of given resource type
 	iam_resource_arns=getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery)
-	
+
 	for iam_resource_arn in iam_resource_arns:
 		inline_policies=getAWSInlinePolicies(data_path,account_name,iam_resource_type,iam_resource_arn)
-		
+
 		for inline_policy in inline_policies:
 			policy_name=inline_policy['PolicyName']
 			policy_document_details=getPolicyDocumentDetails(inline_policy['PolicyDocument'])
-				
+
 			for statement in policy_document_details['Statement']:
 				policy_statement_details=getPolicyStatementDetails(statement)
 				statement_principal=policy_statement_details['Principal']
@@ -538,24 +556,27 @@ def loadAWSInlinePolicies(neo4j_session,data_path,account_name,iam_resource_type
 				#Since empty Principal / Action / Resource is returned as set 
 				#Stringifying it in query run below will result in value as 'set()'.
 				#The following is to avoid it
-				
+
 				if statement_principal==set():
 					statement_principal=""
 				if statement_action==set():
 					statement_action=""
 				if statement_resource==set():
 					statement_resource=""
-				
+
 
 				for resource in policy_statement_details['Resource']:
 					neo4j_session.run(ingest_aws_inline_policies,Aaia_ExpandedAction=policy_statement_details['Aaia_ExpandedAction'],PolicyName=policy_name,SourceResourceArn=iam_resource_arn,SourceResourceType=iam_resource_type,ResourceArn=resource,DocumentVersion=policy_document_details['Version'],DocumentId=policy_document_details['Id'],Effect=policy_statement_details['Effect'],ActionKey=policy_statement_details['ActionKey'],Action=str(statement_action).replace("[","").replace("]","").replace("{","").replace("}","").replace("'",""),Condition=str(policy_statement_details['Condition']),Sid=policy_statement_details['Sid'],ResourceKey=policy_statement_details['ResourceKey'],Resource=str(statement_resource).replace("[","").replace("]","").replace("{","").replace("}","").replace("'",""),Principal=str(statement_principal).replace("[","").replace("]","").replace("{","").replace("}","").replace("'",""),PrincipalKey=policy_statement_details['PrincipalKey'])
-		
+
 		#Match all the inline policies with respective SourceResource Arns
 		ingest_relationship_between_inlinePolicy_and_iamResourcearn='''match (A),(B:AWSInlinePolicy) where A.Arn ={Arn} and B.SourceResourceArn={Arn} with A,B merge (A)-[:AWSPolicyAttachment]->(B) set B.AccountNo=A.AccountNo'''
-	
+
 		neo4j_session.run(ingest_relationship_between_inlinePolicy_and_iamResourcearn,Arn=iam_resource_arn)
-		
-	logger.info("[*] Completed loading AWS "+iam_resource_type+" Inline Policies into neo4j instance for AWS account '%s'",account_name)	
+
+	logger.info(
+		f"[*] Completed loading AWS {iam_resource_type} Inline Policies into neo4j instance for AWS account '%s'",
+		account_name,
+	)	
 
 
 def getAWSGroups(data_path,account_name):
@@ -598,8 +619,10 @@ def getAWSRoles(data_path,account_name):
 	data=[]
 	with open(os.path.join(data_path,account_name,'iam','iam-list-roles.json'),'r') as filein:
 		role_json=json.loads(filein.read())
-	data=pyjq.all('.Roles[] | { Arn: .Arn, CreateDate: .CreateDate, MaxSessionDuration: .MaxSessionDuration,Path: .Path, RoleId: .RoleId, RoleName: .RoleName, Description: .Description}',role_json)
-	return data
+	return pyjq.all(
+		'.Roles[] | { Arn: .Arn, CreateDate: .CreateDate, MaxSessionDuration: .MaxSessionDuration,Path: .Path, RoleId: .RoleId, RoleName: .RoleName, Description: .Description}',
+		role_json,
+	)
 
 
 def loadAWSRoleNodes(neo4j_session,data_path,account_name):
@@ -619,8 +642,9 @@ def loadAWSRoleNodes(neo4j_session,data_path,account_name):
 
 def getAssumeRolePolicy(data_path,account_name,role_arn):
 	jqQuery='.RoleDetailList[] | select (.Arn=="#RoleArn#") | .AssumeRolePolicyDocument'
-	data=getAWSIamAccountAuthorizationDetailsInfo(data_path,account_name,jqQuery.replace("#RoleArn#",role_arn))
-	return data
+	return getAWSIamAccountAuthorizationDetailsInfo(
+		data_path, account_name, jqQuery.replace("#RoleArn#", role_arn)
+	)
 
 def loadAWSRolePrincipalRelations(neo4j_session,data_path,account_name):
 	logger.info("[*] Loading AWS Role Principal relation into neo4j instance for AWS account '%s'",account_name)

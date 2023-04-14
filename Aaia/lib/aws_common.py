@@ -75,7 +75,7 @@ def getPolicyStatementDetails(statement):
 
     if statement_principal:
         # In case of * as value for Principal
-        if statement_principal == '*' or statement_principal == ['*']:
+        if statement_principal in ['*', ['*']]:
             # Sub Key should be AWS (Ref :https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html -> (Everyone (anonymous users))
             principal = OrderedDict()
             principal.__setitem__("AWS", ["*"])
@@ -93,7 +93,7 @@ def getPolicyStatementDetails(statement):
             # As of now , its been stringified as it is just used t display as
             # a property of the statement relation and not actually planned to
             # evaluate
-            statement_condition = str(json.dumps(statement['Condition']))
+            statement_condition = json.dumps(statement['Condition'])
 
     except KeyError:
         statement_condition = ""
@@ -179,9 +179,7 @@ def getPolicyDocumentDetails(policy):
 
     try:
         document_statement = policy['Statement']
-        if type(document_statement) == list:
-            pass
-        else:
+        if type(document_statement) != list:
             document_statement = [policy['Statement']]
 
     except KeyError:

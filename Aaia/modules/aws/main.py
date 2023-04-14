@@ -16,13 +16,10 @@ def main(config,args):
 			help()
 			return
 		try:
-			library=importlib.import_module(__package__+"."+args.module)
-			if args.name:
-				if args.name=="all":
-					library.main(config,args)
-					del (sys.modules[__package__+"."+args.module])
-				else:
-					print("-n missing argument. Currently supported value for name for this module by default is 'all'.",file=sys.stderr)
+			library = importlib.import_module(f"{__package__}.{args.module}")
+			if args.name and args.name == "all":
+				library.main(config,args)
+				del sys.modules[f"{__package__}.{args.module}"]
 			else:
 				print("-n missing argument. Currently supported value for name for this module by default is 'all'.",file=sys.stderr)
 		except ModuleNotFoundError:
@@ -35,9 +32,9 @@ def main(config,args):
 def help():
 	print("\nAaia\n\navailable modules:")
 	for importer, module_name, _ in pkgutil.iter_modules([os.path.dirname(__file__)]):
-		if module_name !="main" :
-			library=importlib.import_module(__package__+"."+module_name)
-			print(module_name+ " : "+library.__description__)
+		if module_name !="main":
+			library = importlib.import_module(f"{__package__}.{module_name}")
+			print(f"{module_name} : {library.__description__}")
 			library.help()
-			del (sys.modules[__package__+"."+module_name])
+			del sys.modules[f"{__package__}.{module_name}"]
 

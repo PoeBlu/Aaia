@@ -119,9 +119,7 @@ def getAWSOrganizationRootNode(data_path,account_name):
 
     jqQuery='.Roots[] | {Id: .Id,Name: .Name,Arn: .Arn,PolicyType: .PolicyTypes[].Type,PolicyStatus: .PolicyTypes[].Status}'
 
-    #The resultant is a Odereddict wrapped in a list. Hence returning an unlisted Ordereddict
-    organization_root_node=pyjq.all(jqQuery,file_content)[0]
-    return organization_root_node
+    return pyjq.all(jqQuery,file_content)[0]
 
 def loadAWSOrganizationRootNode(neo4j_session,data_path,account_name):
     #This function loads the Organization Node (i.e. the Root Node . Do not confuse with Root Account of Organization)
@@ -141,9 +139,7 @@ def getAWSOrganizationMasterAccount(data_path,account_name):
         file_content = json.loads(filein.read())
     jqQuery='.Organization | {Id : .Id, Arn:.Arn,FeatureSet:.FeatureSet,MasterAccountArn:.MasterAccountArn,MasterAccountId:.MasterAccountId,MasterAccountEmail:.MasterAccountEmail,AvailablePolicyType:.AvailablePolicyTypes[].Type,AvailablePolicyStatus:.AvailablePolicyTypes[].Status}'
 
-    # The resultant is a Odereddict wrapped in a list. Hence returning an unlisted Ordereddict
-    organization_master_account_details=pyjq.all(jqQuery,file_content)[0]
-    return organization_master_account_details
+    return pyjq.all(jqQuery,file_content)[0]
 
 def loadAWSOrganizationMasterAccount(neo4j_session,data_path,account_name):
 

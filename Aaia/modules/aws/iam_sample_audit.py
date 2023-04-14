@@ -75,9 +75,7 @@ def neo4jSessionDriver(config):
 	neo4j_user=config['neo4j_conf']['neo4j_user']
 	neo4j_password=config['neo4j_conf']['neo4j_password']
 	neo4j_auth = (neo4j_user, neo4j_password)
-	neo4j_driver = GraphDatabase.driver( neo4j_uri, auth=neo4j_auth,)
-	
-	return(neo4j_driver)
+	return GraphDatabase.driver( neo4j_uri, auth=neo4j_auth,)
 
 def help():
 	pass
@@ -103,12 +101,12 @@ def recordToText(record):
 			policy=Policy(policy_template)
 			for service, summary_action in policy.action_summary().items():
 				temp_string+="{"+str(service)+"-"+str(summary_action).replace("{","").replace("}","")+"},"
-			
+
 			temp_string+="`"
 
 		else:
-			temp_string+=str(record[key])+"`"
-	
+			temp_string += f"{str(record[key])}`"
+
 	return(temp_string.rstrip("`"))
 
 def main(config,args):
@@ -116,7 +114,7 @@ def main(config,args):
 
 	with neo4j_driver.session() as neo4j_session:
 		for cypher in audit_cyphers['audit']:
-		
+
 			#Counter to print the column title
 			#This variable will get reset after every new audit check
 			first_run=True
@@ -125,9 +123,7 @@ def main(config,args):
 			for record in output:
 			#The column title will print only the first time.
 				if first_run:
-					temp_title=""
-					for key in record.keys():
-						temp_title+=key+"`"
+					temp_title = "".join(f"{key}`" for key in record.keys())
 					print(temp_title)
 					#Resetting the counter to avaoid printing the column titles at every loop
 					first_run=False
